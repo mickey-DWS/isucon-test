@@ -7,7 +7,7 @@ deploy:
 .PHONY: log
 log:
 	sudo journalctl -u ${GO_SERVICE_NAME} -n10 -f
-
+	
 .PHONY: analyze
 analyze:
 	bash ./analyze.sh > analyze_result
