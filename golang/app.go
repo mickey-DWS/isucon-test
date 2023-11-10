@@ -1,9 +1,14 @@
 package main
 
 import (
+	"bytes"
 	crand "crypto/rand"
 	"fmt"
 	"html/template"
+	"image"
+	"image/gif"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"log"
 	"net/http"
@@ -594,6 +599,7 @@ func getPostsID(w http.ResponseWriter, r *http.Request) {
 
 func postIndex(w http.ResponseWriter, r *http.Request) {
 	me := getSessionUser(r)
+
 	if !isLogin(me) {
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
@@ -609,29 +615,10 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		session := getSession(r)
 		session.Values["notice"] = "画像が必須です"
 		session.Save(r, w)
+		fmt.Println("a")
 
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
-	}
-
-	mime := ""
-	if file != nil {
-		// 投稿のContent-Typeからファイルのタイプを決定する
-		contentType := header.Header["Content-Type"][0]
-		if strings.Contains(contentType, "jpeg") {
-			mime = "image/jpeg"
-		} else if strings.Contains(contentType, "png") {
-			mime = "image/png"
-		} else if strings.Contains(contentType, "gif") {
-			mime = "image/gif"
-		} else {
-			session := getSession(r)
-			session.Values["notice"] = "投稿できる画像形式はjpgとpngとgifだけです"
-			session.Save(r, w)
-
-			http.Redirect(w, r, "/", http.StatusFound)
-			return
-		}
 	}
 
 	filedata, err := io.ReadAll(file)
@@ -644,17 +631,44 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 		session := getSession(r)
 		session.Values["notice"] = "ファイルサイズが大きすぎます"
 		session.Save(r, w)
+		fmt.Println("b")
 
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
 
+	mime := ""
+	ext := ""
+	if file != nil {
+		// 投稿のContent-Typeからファイルのタイプを決定する
+		contentType := header.Header["Content-Type"][0]
+		if strings.Contains(contentType, "jpeg") {
+			mime = "image/jpeg"
+			ext = "jpeg"
+		} else if strings.Contains(contentType, "png") {
+			mime = "image/png"
+			ext = "png"
+		} else if strings.Contains(contentType, "gif") {
+			mime = "image/gif"
+			ext = "gif"
+		} else {
+			session := getSession(r)
+			session.Values["notice"] = "投稿できる画像形式はjpgとpngとgifだけです"
+			session.Save(r, w)
+			fmt.Println("c")
+
+			http.Redirect(w, r, "/", http.StatusFound)
+			return
+		}
+	}
+
+	// 保存完了後、データベースにはパスを保存
 	query := "INSERT INTO `posts` (`user_id`, `mime`, `imgdata`, `body`) VALUES (?,?,?,?)"
 	result, err := db.Exec(
 		query,
 		me.ID,
 		mime,
-		filedata,
+		[]byte{},
 		r.FormValue("body"),
 	)
 	if err != nil {
@@ -666,6 +680,60 @@ func postIndex(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Print(err)
 		return
+	}
+
+	// 保存するファイルのパスを生成
+	// ファイル名にはユニークなIDを使用することを推奨（ここでは仮に header.Filename を使用）
+	savePath := "/home/isucon/private_isu/webapp/public/image/" + fmt.Sprint(pid) + "." + ext
+
+	// ファイルをサーバーに保存
+	out, err := os.Create(savePath)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer out.Close()
+
+	// バイナリファイルをReaderに読み込み
+	reader := bytes.NewReader(filedata)
+
+	// 画像変換
+	img, _, err := image.Decode(reader)
+	if err != nil {
+		fmt.Errorf("err %v", err)
+	}
+	opt := jpeg.Options{
+		Quality: 90,
+	}
+
+	if ext == "jpg" {
+		// ファイルの内容をコピー
+		err = jpeg.Encode(out, img, &opt)
+		if err != nil {
+			log.Print(err)
+			return
+		}
+
+	}
+
+	if ext == "png" {
+		// ファイルの内容をコピー
+		err = png.Encode(out, img)
+		if err != nil {
+			log.Print(err)
+			return
+		}
+
+	}
+
+	if ext == "gif" {
+		// ファイルの内容をコピー
+		err = gif.Encode(out, img, nil)
+		if err != nil {
+			log.Print(err)
+			return
+		}
+
 	}
 
 	http.Redirect(w, r, "/posts/"+strconv.FormatInt(pid, 10), http.StatusFound)
@@ -697,10 +765,63 @@ func getImage(w http.ResponseWriter, r *http.Request) {
 			log.Print(err)
 			return
 		}
+	} else {
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	// 保存するファイルのパスを生成
+	// ファイル名にはユニークなIDを使用することを推奨（ここでは仮に header.Filename を使用）
+	savePath := "/home/isucon/private_isu/webapp/public/image/" + fmt.Sprint(pid) + "." + ext
 
-	w.WriteHeader(http.StatusNotFound)
+	// ファイルをサーバーに保存
+	file, err := os.Create(savePath)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer file.Close()
+
+	// バイナリファイルをReaderに読み込み
+	reader := bytes.NewReader(post.Imgdata)
+
+	// 画像変換
+	img, _, err := image.Decode(reader)
+	if err != nil {
+		fmt.Errorf("err %v", err)
+	}
+	opt := jpeg.Options{
+		Quality: 90,
+	}
+
+	if ext == "jpg" {
+		// ファイルの内容をコピー
+		err = jpeg.Encode(file, img, &opt)
+		if err != nil {
+			log.Print(err)
+			return
+		}
+
+	}
+
+	if ext == "png" {
+		// ファイルの内容をコピー
+		err = png.Encode(file, img)
+		if err != nil {
+			log.Print(err)
+			return
+		}
+
+	}
+
+	if ext == "gif" {
+		// ファイルの内容をコピー
+		err = gif.Encode(file, img, nil)
+		if err != nil {
+			log.Print(err)
+			return
+		}
+
+	}
 }
 
 func postComment(w http.ResponseWriter, r *http.Request) {
